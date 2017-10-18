@@ -3,8 +3,10 @@
   <PropertyGroup>
       <TestDotNetPath>$(RepositoryRoot).test-dotnet\</TestDotNetPath>
       <AppsArtifactDirectory>$(RepositoryRoot)artifacts\apps</AppsArtifactDirectory>
-      <SiteExtensionWorkingDirectory>$(TestDotNetPath)extension\</SiteExtensionWorkingDirectory>
-      <SiteExtensionProjectDirectory>$(RepositoryRoot)src\Microsoft.AspNetCore.AzureAppServices.TestBundle\</SiteExtensionProjectDirectory>
+      <TestSiteExtensionWorkingDirectory>$(TestDotNetPath)extension\</TestSiteExtensionWorkingDirectory>
+      <TestSiteExtensionProjectDirectory>$(RepositoryRoot)src\Microsoft.AspNetCore.AzureAppServices.TestBundle\</TestSiteExtensionProjectDirectory>
+      <PreviewSiteExtensionWorkingDirectory>$(TestDotNetPath)previewextension\</PreviewSiteExtensionWorkingDirectory>
+      <PreviewSiteExtensionProjectDirectory>$(RepositoryRoot)src\Microsoft.AspNetCore.AzureAppServices.PreviewBundle\</PreviewSiteExtensionProjectDirectory>
       <TestProjectDirectory>$(RepositoryRoot)\test\Microsoft.AspNetCore.AzureAppServices.FunctionalTests\</TestProjectDirectory>
       <SiteExtensionFeed Condition="$(SiteExtensionFeed) == ''">https://dotnet.myget.org/F/aspnetcore-ci-dev/</SiteExtensionFeed>
       <DotnetChannel>master</DotnetChannel>
@@ -20,11 +22,20 @@
 
   <Target Name="_AddSiteExtensionRuntimes">
     <ItemGroup>
-      <DotNetCoreSdk Include="coherent" Channel="master" InstallDir="$(SiteExtensionWorkingDirectory)" Arch="x86" />
+      <DotNetCoreSdk Include="coherent" Channel="master" InstallDir="$(TestSiteExtensionWorkingDirectory)" Arch="x86" />
     </ItemGroup>
   </Target>
 
-  <Target Name="BuildSiteExtension" DependsOnTargets="_AddSiteExtensionRuntimes;InstallDotNet">
+  <Target Name="_AddPreviewSiteExtensionRuntimes">
+    <ItemGroup>
+      <DotNetCoreSdk Include="2.0.0" InstallDir="$(PreviewSiteExtensionWorkingDirectory)" FallbackPackageCache="True" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="BuildSiteExtension" DependsOnTargets="BuildTestSiteExtension;BuildPreviewSiteExtension">
+  </Target>
+
+  <Target Name="BuildTestSiteExtension" DependsOnTargets="_AddSiteExtensionRuntimes;InstallDotNet">
 
     <PropertyGroup>
       <CliVersionRelativePath>build\dotnet.version</CliVersionRelativePath>
@@ -34,18 +45,24 @@
       <DotNetCacheArchiveItems Include="$(DotNetCacheArchives)" />
     </ItemGroup>
 
-    <UnzipArchive File="%(RuntimeArchiveItems.Identity)" Destination="$(SiteExtensionWorkingDirectory)" Condition="'$(RuntimeArchives)' != ''" Overwrite="true" />
-    <UnzipArchive File="%(DotNetCacheArchiveItems.Identity)" Destination="$(SiteExtensionWorkingDirectory)DotNetCache" Condition="'$(DotNetCacheArchives)' != ''" Overwrite="true" />
+    <UnzipArchive File="%(RuntimeArchiveItems.Identity)" Destination="$(TestSiteExtensionWorkingDirectory)" Condition="'$(RuntimeArchives)' != ''" Overwrite="true" />
+    <UnzipArchive File="%(DotNetCacheArchiveItems.Identity)" Destination="$(TestSiteExtensionWorkingDirectory)DotNetCache" Condition="'$(DotNetCacheArchives)' != ''" Overwrite="true" />
 
-    <MSBuild Projects="$(SiteExtensionProjectDirectory)Microsoft.AspNetCore.AzureAppServices.TestBundle.csproj"
+    <MSBuild Projects="$(TestSiteExtensionProjectDirectory)Microsoft.AspNetCore.AzureAppServices.TestBundle.csproj"
       Targets="Restore;Pack"
-      Properties="DotnetHomeDirectory=$(SiteExtensionWorkingDirectory);BuildNumber=$(BuildNumber)" />
+      Properties="DotnetHomeDirectory=$(TestSiteExtensionWorkingDirectory);BuildNumber=$(BuildNumber)" />
 
+  </Target>
+  
+  <Target Name="BuildPreviewSiteExtension" DependsOnTargets="_AddPreviewSiteExtensionRuntimes;InstallDotNet">
+      <MSBuild Projects="$(PreviewSiteExtensionProjectDirectory)Microsoft.AspNetCore.AzureAppServices.PreviewBundle.csproj"
+      Targets="Restore;Pack"
+      Properties="DotnetHomeDirectory=$(PreviewSiteExtensionWorkingDirectory);BuildNumber=$(BuildNumber)" />
   </Target>
 
   <Target Name="PushSiteExtension">
     <ItemGroup>
-      <RepositoryNupkgs Include="$(SiteExtensionProjectDirectory)bin\$(Configuration)\*.nupkg" />
+      <RepositoryNupkgs Include="$(TestSiteExtensionProjectDirectory)bin\$(Configuration)\*.nupkg" />
     </ItemGroup>
 
     <PushNuGetPackages

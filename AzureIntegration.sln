@@ -46,10 +46,16 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.AspNetCore.AzureA
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Microsoft.AspNetCore.AzureAppServices.TestBundle", "src\Microsoft.AspNetCore.AzureAppServices.TestBundle\Microsoft.AspNetCore.AzureAppServices.TestBundle.csproj", "{1EC31DA1-131D-4257-B001-BE8391E6077E}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Microsoft.AspNetCore.AzureAppServices.PreviewBundle", "src\Microsoft.AspNetCore.AzureAppServices.PreviewBundle\Microsoft.AspNetCore.AzureAppServices.PreviewBundle.csproj", "{DD612D24-BEDC-470E-8856-094284BF9FB5}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
 		Release|Any CPU = Release|Any CPU
+		Debug|x64 = Debug|x64
+		Debug|x86 = Debug|x86
+		Release|x64 = Release|x64
+		Release|x86 = Release|x86
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{5916BEB5-0969-469B-976C-A392E015DFAC}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
@@ -100,6 +106,18 @@ Global
 		{1EC31DA1-131D-4257-B001-BE8391E6077E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1EC31DA1-131D-4257-B001-BE8391E6077E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1EC31DA1-131D-4257-B001-BE8391E6077E}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|x64.ActiveCfg = Debug|x64
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|x64.Build.0 = Debug|x64
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|x86.ActiveCfg = Debug|x86
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Debug|x86.Build.0 = Debug|x86
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|x64.ActiveCfg = Release|x64
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|x64.Build.0 = Release|x64
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|x86.ActiveCfg = Release|x86
+		{DD612D24-BEDC-470E-8856-094284BF9FB5}.Release|x86.Build.0 = Release|x86
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -117,6 +135,7 @@ Global
 		{0899A101-E451-40A4-81B0-7AA18202C25D} = {CD650B4B-81C2-4A44-AEF2-A251A877C1F0}
 		{2B2C37FF-9249-4EA4-9A7F-038B55A15C2C} = {CD650B4B-81C2-4A44-AEF2-A251A877C1F0}
 		{1EC31DA1-131D-4257-B001-BE8391E6077E} = {FF9B744E-6C59-40CC-9E41-9D2EBD292435}
+		{DD612D24-BEDC-470E-8856-094284BF9FB5} = {FF9B744E-6C59-40CC-9E41-9D2EBD292435}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {5743DFE7-1AA5-439D-84AE-A480EA389927}
