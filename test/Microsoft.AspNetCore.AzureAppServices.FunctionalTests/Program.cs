@@ -104,14 +104,18 @@ namespace Microsoft.AspNetCore.AzureAppServices.FunctionalTests
 
             var legacyTemplates = new (string Version, string RuntimeVersion, string Name, string Output)[]
             {
-                ("1.0.5", "1.0.7", "web", "Hello World!"),
-                ("1.0.5", "1.0.7", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
-                ("1.0.6", "1.0.7", "web", "Hello World!"),
-                ("1.0.6", "1.0.7", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
-                ("1.1.2", "1.1.4", "web", "Hello World!"),
-                ("1.1.2", "1.1.4", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
-                ("1.1.3", "1.1.4", "web", "Hello World!"),
-                ("1.1.3", "1.1.4", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.0.5", "1.0.8", "web", "Hello World!"),
+                ("1.0.5", "1.0.8", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.0.6", "1.0.8", "web", "Hello World!"),
+                ("1.0.6", "1.0.8", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.0.7", "1.0.8", "web", "Hello World!"),
+                ("1.0.7", "1.0.8", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.1.2", "1.1.5", "web", "Hello World!"),
+                ("1.1.2", "1.1.5", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.1.3", "1.1.5", "web", "Hello World!"),
+                ("1.1.3", "1.1.5", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
+                ("1.1.4", "1.1.5", "web", "Hello World!"),
+                ("1.1.4", "1.1.5", "mvc", "Learn how to build ASP.NET apps that can run anywhere"),
             };
 
             foreach (var template in legacyTemplates)
