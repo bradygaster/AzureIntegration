@@ -11,7 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <HostingStartupPackageReference Include="Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup" Version="$(MicrosoftAspNetCoreApplicationInsightsVisualStudioHostingStartupPackageVersion)" />
+    <HostingStartupPackageReference Include="Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup" Version="$(PackageVersion)" />
 
     <PackageReference Include="Internal.AspNetCore.SiteExtension.Sdk" Version="$(InternalAspNetCoreSiteExtensionSdkPackageVersion)" PrivateAssets="All" />
   </ItemGroup>
