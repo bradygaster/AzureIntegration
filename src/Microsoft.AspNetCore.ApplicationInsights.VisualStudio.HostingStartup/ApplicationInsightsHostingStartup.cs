@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
-using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -14,6 +13,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DiagnosticAdapter;
 using Microsoft.Extensions.Logging;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Serialization;
 
 [assembly: HostingStartup(typeof(Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup.ApplicationInsightsVisualStudioHostingStartup))]
 
@@ -53,133 +54,111 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
     {
         public static readonly string DefaultTelemetryNamePrefix = "Microsoft.AspNetCore.";
         public static readonly string DefaultDeveloperTelemetryNamePrefix = "Microsoft.AspNetCore.Dev";
-    }
-
-    internal interface JValue
-    {
-        string ToJson();
-    }
-
-    internal class JObject : JValue
-    {
-        public IList<JProperty> Properties { get; } = new List<JProperty>();
-
-        public string ToJson()
+        public static readonly JsonSerializerSettings JsonSerializationSettings = new JsonSerializerSettings
         {
-            if (Properties.Count == 0)
+            ContractResolver = new CamelCasePropertyNamesContractResolver(),
+            NullValueHandling = NullValueHandling.Ignore
+        };
+    }
+
+    internal class AspNetCoreAITelemetryPropertiesConverter : JsonConverter
+    {
+        public override bool CanConvert(Type objectType)
+            => objectType == typeof(AspNetCoreAITelemetryProperties);
+
+        public override bool CanRead => false;
+
+        public override object ReadJson(JsonReader reader, Type objectType, object existingValue, JsonSerializer serializer) => throw new NotImplementedException();
+
+        public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
+        {
+            var properties = value as AspNetCoreAITelemetryProperties;
+            writer.WriteStartObject();
+
+            foreach (var property in value.GetType().GetProperties())
             {
-                return "{}";
+                if (property.CanRead && property.GetType() == typeof(string))
+                {
+                    var propertyName = property.Name;
+                    var propertyValue = property.GetValue(value) as string;
+
+                    if (!string.IsNullOrEmpty(propertyValue))
+                    {
+                        writer.WritePropertyName(propertyName);
+                        writer.WriteValue(propertyValue);
+                    }
+                }
             }
 
-            var firstValue = true;
-            var sb = new StringBuilder();
-            sb.Append('{');
-            foreach (var property in Properties)
+            if (properties.MessageMetadata != null)
             {
-                if (!firstValue)
+                foreach (var metadata in properties.MessageMetadata)
                 {
-                    sb.Append(',');
+                    writer.WritePropertyName(metadata.Key);
+                    writer.WriteValue(Convert.ToString(metadata.Value, CultureInfo.InvariantCulture));
                 }
-                if (firstValue)
-                {
-                    firstValue = false;
-                }
-                sb.Append(property.ToJson());
             }
-            sb.Append('}');
-
-            return sb.ToString();
+            writer.WriteEndObject();
         }
     }
 
-    internal class JArray : JValue
+    [JsonConverter(typeof(AspNetCoreAITelemetryPropertiesConverter))]
+    internal class AspNetCoreAITelemetryProperties
     {
-        public IList<JValue> Values { get; } = new List<JValue>();
+        public string handledAt { get; internal set; }
+        public string DeveloperMode { get; internal set; }
+        public string AspNetCoreEnvironment { get; internal set; }
+        public string CategoryName { get; internal set; }
 
-        public string ToJson()
-        {
-            if (Values.Count == 0)
-            {
-                return "[]";
-            }
-
-            var firstValue = true;
-            var sb = new StringBuilder();
-            sb.Append('[');
-            foreach (var property in Values)
-            {
-                if (!firstValue)
-                {
-                    sb.Append(',');
-                }
-                if (firstValue)
-                {
-                    firstValue = false;
-                }
-                sb.Append(property.ToJson());
-            }
-            sb.Append(']');
-
-            return sb.ToString();
-        }
+        public IEnumerable<KeyValuePair<string, object>> MessageMetadata { get; internal set; }
     }
 
-    internal class JProperty : JValue
+    internal class AspNetCoreAITelemetryStackFrame
     {
-        public JProperty(string name, JValue value)
-        {
-            Name = name;
-            Value = value;
-        }
-
-        public string Name { get; }
-        public JValue Value { get; }
-
-        public string ToJson()
-        {
-            return $@"""{Name}"":{Value.ToJson()}";
-        }
+        public int Level { get; internal set; }
+        public string Method { get; internal set; }
+        public string Assembly { get; internal set; }
+        public string FileName { get; internal set; }
+        public int? Line { get; internal set; }
     }
 
-    internal class JString : JValue
+    internal class AspNetCoreAITelemetryException
     {
-        public JString(string value)
-        {
-            Value = value;
-        }
-
-        public string Value { get; set; }
-
-        public string ToJson()
-        {
-            return $@"""{Value}""".Replace("\\", "\\\\");
-        }
+        public int Id { get; internal set; }
+        public string TypeName { get; internal set; }
+        public string Message { get; internal set; }
+        public bool HasFullStack { get; internal set; }
+        public AspNetCoreAITelemetryStackFrame[] ParsedStack { get; internal set; }
     }
 
-    internal class JLiteral : JValue
+    internal class AspNetCoreAITelemetryBaseData
     {
-        public JLiteral(string value)
-        {
-            Value = value;
-        }
-
-        public string Value { get; set; }
-
-        public string ToJson()
-        {
-            return Value;
-        }
+        public int Ver { get; internal set; }
+        public string Id { get; internal set; }
+        public string Name { get; internal set; }
+        public string Duration { get; internal set; }
+        public bool Success { get; internal set; }
+        public string ResponseCode { get; internal set; }
+        public string Url { get; internal set; }
+        public string Message { get; internal set; }
+        public string SeverityLevel { get; internal set; }
+        public AspNetCoreAITelemetryProperties Properties { get; internal set; }
+        public AspNetCoreAITelemetryException Exceptions { get; internal set; }
     }
 
-    internal interface IAspNetCoreAITelemetry
+    internal class AspNetCoreAITelemetryData
     {
-        JObject JsonData { get; }
-
-        string ToJson();
+        public string BaseType { get; internal set; }
+        public AspNetCoreAITelemetryBaseData BaseData { get; internal set; }
     }
 
-    internal abstract class AspNetCoreAITelemetry : IAspNetCoreAITelemetry
+    internal abstract class AspNetCoreAITelemetry
     {
+        public string Name { get; internal set; }
+        public DateTime Time { get; internal set; }
+        public string InstrumentationKey { get; internal set; }
+        public AspNetCoreAITelemetryData Data { get; internal set; }
+
         public AspNetCoreAITelemetry(string name, string instrumentationKey, bool developerMode)
         {
             var fullname = developerMode
@@ -190,22 +169,9 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
                 fullname += $".{instrumentationKey.Replace("-", string.Empty)}";
             }
             fullname += $".{name}";
-            JsonData.Properties.Add(new JProperty("name", new JString(fullname)));
-
-            var startTime = Activity.Current.StartTimeUtc;
-            JsonData.Properties.Add(new JProperty("time", new JString(startTime.ToString("o", CultureInfo.InvariantCulture))));
-
-            if (!string.IsNullOrEmpty(instrumentationKey))
-            {
-                JsonData.Properties.Add(new JProperty("iKey", new JString(instrumentationKey)));
-            }
-        }
-
-        public JObject JsonData { get; } = new JObject();
-
-        public virtual string ToJson()
-        {
-            return JsonData.ToJson();
+            Name = fullname;
+            Time = Activity.Current?.StartTimeUtc ?? DateTime.UtcNow;
+            InstrumentationKey = instrumentationKey;
         }
     }
 
@@ -223,7 +189,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
             _httpContext = httpContext;
         }
 
-        public override string ToJson()
+        public override string ToString()
         {
             var request = _httpContext.Request;
             var response = _httpContext.Response;
@@ -236,53 +202,38 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
             var duration = currentActivity.Duration;
             var operationId = currentActivity.Id;
 
-            var properties = new JObject();
-            properties.Properties.Add(new JProperty("DeveloperMode", new JString((_developerMode ? "true" : "false"))));
-            properties.Properties.Add(new JProperty("AspNetCoreEnvironment", new JString(_environment)));
+            Data = new AspNetCoreAITelemetryData
+            {
+                BaseType = "RequestData",
+                BaseData = new AspNetCoreAITelemetryBaseData
+                {
+                    Ver = 2,
+                    Id = operationId,
+                    Name = $"{method} {path}",
+                    Duration = duration.ToString(),
+                    Success = success,
+                    ResponseCode = statusCode.ToString(),
+                    Url = url,
+                    Properties = new AspNetCoreAITelemetryProperties
+                    {
+                        DeveloperMode = _developerMode ? "true" : "false",
+                        AspNetCoreEnvironment = _environment
+                    }
+                }
+            };
 
-            var baseData = new JObject();
-            baseData.Properties.Add(new JProperty("ver", new JLiteral("2")));
-            baseData.Properties.Add(new JProperty("id", new JString(operationId)));
-            baseData.Properties.Add(new JProperty("name", new JString($"{method} {path}")));
-            baseData.Properties.Add(new JProperty("duration", new JString(duration.ToString())));
-            baseData.Properties.Add(new JProperty("success", new JLiteral((success ? "true" : "false"))));
-            baseData.Properties.Add(new JProperty("responseCode", new JString(statusCode.ToString())));
-            baseData.Properties.Add(new JProperty("url", new JString(url)));
-            baseData.Properties.Add(new JProperty("properties", properties));
-
-            var data = new JObject();
-            data.Properties.Add(new JProperty("baseType", new JString("RequestData")));
-            data.Properties.Add(new JProperty("baseData", baseData));
-
-            JsonData.Properties.Add(new JProperty("data", data));
-
-            return JsonData.ToJson();
+            return JsonConvert.SerializeObject(this, AspNetCoreAIConstants.JsonSerializationSettings);
         }
     }
 
     internal class AspNetCoreAIExceptionTelemetry : AspNetCoreAITelemetry
     {
-        private bool _developerMode;
-        private string _environment;
-        private Exception _exception;
-
         public AspNetCoreAIExceptionTelemetry(string instrumentationKey, bool developerMode, string environment, Exception exception)
             : base("Exception", instrumentationKey, developerMode)
         {
-            _developerMode = developerMode;
-            _environment = environment;
-            _exception = exception;
-        }
+            var parsedStack = new List<AspNetCoreAITelemetryStackFrame>();
+            var stackTrace = new StackTrace(exception, true);
 
-        public override string ToJson()
-        {
-            var properties = new JObject();
-            properties.Properties.Add(new JProperty("handledAt", new JString("Platform")));
-            properties.Properties.Add(new JProperty("AspNetCoreEnvironment", new JString(_environment)));
-            properties.Properties.Add(new JProperty("DeveloperMode", new JString((_developerMode ? "true" : "false"))));
-
-            var parsedStack = new JArray();
-            var stackTrace = new StackTrace(_exception, true);
             for (var i = 0; i < stackTrace.FrameCount; i++)
             {
                 var stackFrame = stackTrace.GetFrame(i);
@@ -291,94 +242,74 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
                 var fileName = stackFrame.GetFileName();
                 var lineNumber = stackFrame.GetFileLineNumber();
 
-                var parsedStackObject = new JObject();
-                parsedStackObject.Properties.Add(new JProperty("level", new JLiteral(i.ToString())));
-                parsedStackObject.Properties.Add(new JProperty("method", new JString(fullMethodName)));
-                parsedStackObject.Properties.Add(new JProperty("assembly", new JString(method.Module.Assembly.FullName)));
-                if (!string.IsNullOrEmpty(fileName))
+                var parsedStackFrame = new AspNetCoreAITelemetryStackFrame
                 {
-                    parsedStackObject.Properties.Add(new JProperty("fileName", new JString(fileName)));
-                }
+                    Level = i,
+                    Method = fullMethodName,
+                    Assembly = method.Module.Assembly.FullName,
+                    FileName = fileName?.Replace("\\", "\\\\")
+                };
+
                 if (lineNumber != 0) // 0 is unavailable
                 {
-                    parsedStackObject.Properties.Add(new JProperty("line", new JLiteral(lineNumber.ToString())));
+                    parsedStackFrame.Line = lineNumber;
                 }
 
-                parsedStack.Values.Add(parsedStackObject);
+                parsedStack.Add(parsedStackFrame);
             }
 
-            var exceptions = new JObject();
-            exceptions.Properties.Add(new JProperty("id", new JLiteral(_exception.GetHashCode().ToString())));
-            exceptions.Properties.Add(new JProperty("typeName", new JString(_exception.GetType().FullName)));
-            exceptions.Properties.Add(new JProperty("message", new JString(_exception.Message)));
-            exceptions.Properties.Add(new JProperty("hasFullStack", new JLiteral("true")));
-            exceptions.Properties.Add(new JProperty("parsedStack", parsedStack));
-
-            var exceptionArray = new JArray();
-            exceptionArray.Values.Add(exceptions);
-
-            var baseData = new JObject();
-            baseData.Properties.Add(new JProperty("ver", new JLiteral("2")));
-            baseData.Properties.Add(new JProperty("properties", properties));
-            baseData.Properties.Add(new JProperty("exceptions", exceptionArray));
-
-            var data = new JObject();
-            data.Properties.Add(new JProperty("baseType", new JString("ExceptionData")));
-            data.Properties.Add(new JProperty("baseData", baseData));
-
-            JsonData.Properties.Add(new JProperty("data", data));
-
-            return JsonData.ToJson();
+            Data = new AspNetCoreAITelemetryData
+            {
+                BaseType = "ExceptionData",
+                BaseData = new AspNetCoreAITelemetryBaseData
+                {
+                    Ver = 2,
+                    Properties = new AspNetCoreAITelemetryProperties
+                    {
+                        handledAt = "Platform",
+                        DeveloperMode = developerMode ? "true" : "false",
+                        AspNetCoreEnvironment = environment
+                    },
+                    Exceptions = new AspNetCoreAITelemetryException
+                    {
+                        Id = exception.GetHashCode(),
+                        TypeName = exception.GetType().FullName,
+                        Message = exception.Message,
+                        HasFullStack = true,
+                        ParsedStack = parsedStack.ToArray()
+                    }
+                }
+            };
         }
+
+        public override string ToString() => JsonConvert.SerializeObject(this, AspNetCoreAIConstants.JsonSerializationSettings);
     }
 
     internal class AspNetCoreAITraceTelemetry : AspNetCoreAITelemetry
     {
-        private readonly bool _developerMode;
-        private readonly string _environment;
-        private readonly string _categoryName;
-        private readonly string _message;
-        private readonly LogLevel _logLevel;
-        private readonly object _state;
-
         public AspNetCoreAITraceTelemetry(string instrumentationKey, bool developerMode, string environment, string categoryName, string message, LogLevel logLevel, object state)
             : base("Message", instrumentationKey, developerMode)
         {
-            _developerMode = developerMode;
-            _environment = environment;
-            _categoryName = categoryName;
-            _message = message;
-            _logLevel = logLevel;
-            _state = state;
-        }
-
-        public override string ToJson()
-        {
-            var properties = new JObject();
-            properties.Properties.Add(new JProperty("DeveloperMode", new JString((_developerMode ? "true" : "false"))));
-            properties.Properties.Add(new JProperty("AspNetCoreEnvironment", new JString(_environment)));
-            properties.Properties.Add(new JProperty("CategoryName", new JString(_categoryName)));
-
-            var stateDictionary = _state as IReadOnlyList<KeyValuePair<string, object>>;
-            foreach (var item in stateDictionary)
+            Data = new AspNetCoreAITelemetryData
             {
-                properties.Properties.Add(new JProperty(item.Key, new JString(Convert.ToString(item.Value, CultureInfo.InvariantCulture))));
-            }
-
-            var baseData = new JObject();
-            baseData.Properties.Add(new JProperty("ver", new JLiteral("2")));
-            baseData.Properties.Add(new JProperty("message", new JString(_message)));
-            baseData.Properties.Add(new JProperty("severityLevel", new JString(GetSeverityLevel(_logLevel))));
-            baseData.Properties.Add(new JProperty("properties", properties));
-
-            var data = new JObject();
-            data.Properties.Add(new JProperty("baseType", new JString("MessageData")));
-            data.Properties.Add(new JProperty("baseData", baseData));
-
-            JsonData.Properties.Add(new JProperty("data", data));
-
-            return JsonData.ToJson();
+                BaseType = "MessageData",
+                BaseData = new AspNetCoreAITelemetryBaseData
+                {
+                    Ver = 2,
+                    Message = message,
+                    SeverityLevel = GetSeverityLevel(logLevel),
+                    Properties = new AspNetCoreAITelemetryProperties
+                    {
+                        DeveloperMode = developerMode ? "true" : "false",
+                        AspNetCoreEnvironment = environment,
+                        CategoryName = categoryName,
+                        MessageMetadata = state as IReadOnlyList<KeyValuePair<string, object>>
+                    }
+                }
+            };
         }
+
+        public override string ToString() => JsonConvert.SerializeObject(this, AspNetCoreAIConstants.JsonSerializationSettings);
 
         private string GetSeverityLevel(LogLevel logLevel)
         {
@@ -444,13 +375,13 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         [DiagnosticName("Microsoft.AspNetCore.Hosting.HttpRequestIn.Start")]
         public void OnRequestStart(HttpContext httpContext)
         {
-            httpContext.Features.Set<IAspNetCoreAITelemetry>(new AspNetCoreAIRequestTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, httpContext));
+            httpContext.Features.Set(new AspNetCoreAIRequestTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, httpContext));
         }
 
         [DiagnosticName("Microsoft.AspNetCore.Hosting.HttpRequestIn.Stop")]
         public void OnRequestStop(HttpContext httpContext)
         {
-            Debug.WriteLine($"{_options.TelemetryPrefix}{httpContext.Features.Get<IAspNetCoreAITelemetry>().ToJson()}");
+            Debug.WriteLine($"{_options.TelemetryPrefix}{httpContext.Features.Get<AspNetCoreAIRequestTelemetry>()}");
         }
 
         [DiagnosticName("Microsoft.AspNetCore.Hosting.UnhandledException")]
@@ -467,7 +398,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
         private void OnException(Exception exception)
         {
-            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception).ToJson()}");
+            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception)}");
         }
     }
 
@@ -488,7 +419,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAITraceTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, _categoryName, formatter(state, exception), logLevel, state).ToJson()}");
+            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAITraceTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, _categoryName, formatter(state, exception), logLevel, state)}");
         }
     }
 
