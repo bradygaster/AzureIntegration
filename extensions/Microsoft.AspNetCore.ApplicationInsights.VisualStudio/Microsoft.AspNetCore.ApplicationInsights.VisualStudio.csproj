@@ -1,5 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
+  <UsingTask TaskName="Microsoft.AspNetCore.BuildTools.Sdk_UnzipArchive" AssemblyFile="$(_BuildToolsAssembly)" Condition=" '$(_BuildToolsAssembly)' != '' "/>
+  <UsingTask TaskName="Microsoft.AspNetCore.BuildTools.Sdk_ZipArchive" AssemblyFile="$(_BuildToolsAssembly)" Condition=" '$(_BuildToolsAssembly)' != '' "/>
   <PropertyGroup>
     <title>ASP.NET Core Extensions</title>
     <Description>Description</Description>
@@ -8,6 +10,8 @@
     <PackageTags>aspnet;logging;aspnetcore;AzureSiteExtension;keyvault;configuration;dataprotection</PackageTags>
     <ContentTargetFolders>content</ContentTargetFolders>
     <HostingStartupRuntimeFrameworkVersion>$(MicrosoftNETCoreApp21PackageVersion)</HostingStartupRuntimeFrameworkVersion>
+
+    <PackDependsOn>$(PackDependsOn);RepackageAsZip</PackDependsOn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -15,5 +19,24 @@
 
     <PackageReference Include="Internal.AspNetCore.SiteExtension.Sdk" Version="$(InternalAspNetCoreSiteExtensionSdkPackageVersion)" PrivateAssets="All" />
   </ItemGroup>
+
+  <Target Name="RepackageAsZip">
+    <ItemGroup>
+      <SiteExtensionNupkg Include="$(PackageOutputPath)\$(MSBuildProjectName).$(PackageVersion).nupkg" />
+    </ItemGroup>
+
+    <PropertyGroup>
+      <RepackageWorkingDir>$(RepositoryRoot)obj\</RepackageWorkingDir>
+    </PropertyGroup>
+
+    <RemoveDir Directories="$(RepackageWorkingDir)" Condition="" />
+    <Sdk_UnzipArchive File="@(SiteExtensionNupkg)" Destination="$(RepackageWorkingDir)" Overwrite="true" />
+
+    <ItemGroup>
+      <SiteExtensionZipFiles Include="$(RepackageWorkingDir)content\**\*" />
+    </ItemGroup>
+
+    <Sdk_ZipArchive SourceFiles="@(SiteExtensionZipFiles)" WorkingDirectory="$(RepackageWorkingDir)content\" File="$(PackageOutputPath)\$(MSBuildProjectName).$(PackageVersion).zip" Overwrite="True" />
+  </Target>
 
 </Project>

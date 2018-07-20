@@ -6,9 +6,14 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Reflection;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DiagnosticAdapter;
@@ -50,8 +55,11 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
             }
         }
     }
+
     internal static class AspNetCoreAIConstants
     {
+        public static readonly string AspNetCoreAIOperationNameTagKey = "Microsoft.AspNetCore.ApplicationInsights.OperationName";
+        public static readonly string AspNetCoreAILocationIpTagKey = "Microsoft.AspNetCore.ApplicationInsights.LocationIp";
         public static readonly string DefaultTelemetryNamePrefix = "Microsoft.AspNetCore.";
         public static readonly string DefaultDeveloperTelemetryNamePrefix = "Microsoft.AspNetCore.Dev";
         public static readonly JsonSerializerSettings JsonSerializationSettings = new JsonSerializerSettings
@@ -61,7 +69,18 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         };
     }
 
-    internal class AspNetCoreAITelemetryPropertiesConverter : JsonConverter
+    [AttributeUsage(AttributeTargets.Property, AllowMultiple = false)]
+    internal class SerializationNameAttribute : Attribute
+    {
+        public string Name { get; }
+
+        public SerializationNameAttribute(string name)
+        {
+            Name = name;
+        }
+    }
+
+    internal class AspNetCoreAITelemetryConverter : JsonConverter
     {
         public override bool CanConvert(Type objectType)
             => objectType == typeof(AspNetCoreAITelemetryProperties);
@@ -72,14 +91,14 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
-            var properties = value as AspNetCoreAITelemetryProperties;
             writer.WriteStartObject();
 
             foreach (var property in value.GetType().GetProperties())
             {
-                if (property.CanRead && property.GetType() == typeof(string))
+                if (property.CanRead && property.PropertyType == typeof(string))
                 {
-                    var propertyName = property.Name;
+                    var customName = property.GetCustomAttributes(typeof(SerializationNameAttribute), false).SingleOrDefault() as SerializationNameAttribute;
+                    var propertyName = customName?.Name ?? property.Name;
                     var propertyValue = property.GetValue(value) as string;
 
                     if (!string.IsNullOrEmpty(propertyValue))
@@ -90,27 +109,51 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
                 }
             }
 
-            if (properties.MessageMetadata != null)
+            var properties = value as AspNetCoreAITelemetryProperties;
+            if (properties?.MessageMetadata != null)
             {
                 foreach (var metadata in properties.MessageMetadata)
                 {
-                    writer.WritePropertyName(metadata.Key);
-                    writer.WriteValue(Convert.ToString(metadata.Value, CultureInfo.InvariantCulture));
+                    var metadataValue = Convert.ToString(metadata.Value, CultureInfo.InvariantCulture);
+                    if (!string.IsNullOrEmpty(metadataValue))
+                    {
+                        writer.WritePropertyName(metadata.Key);
+                        writer.WriteValue(metadataValue);
+                    }
                 }
             }
             writer.WriteEndObject();
         }
     }
 
-    [JsonConverter(typeof(AspNetCoreAITelemetryPropertiesConverter))]
+    [JsonConverter(typeof(AspNetCoreAITelemetryConverter))]
     internal class AspNetCoreAITelemetryProperties
     {
-        public string handledAt { get; internal set; }
-        public string DeveloperMode { get; internal set; }
+        [SerializationName("handledAt")]
+        public string HandledAt { get; internal set; }
         public string AspNetCoreEnvironment { get; internal set; }
+        public string DeveloperMode { get; internal set; }
         public string CategoryName { get; internal set; }
+        public string Exception { get; internal set; }
 
         public IEnumerable<KeyValuePair<string, object>> MessageMetadata { get; internal set; }
+    }
+
+    [JsonConverter(typeof(AspNetCoreAITelemetryConverter))]
+    internal class AspNetCoreAITelemetryTags
+    {
+        [SerializationName("ai.application.ver")]
+        public string ApplicationVersion { get; internal set; }
+        [SerializationName("ai.cloud.roleInstance")]
+        public string CloudRoleInstance { get; internal set; }
+        [SerializationName("ai.operation.id")]
+        public string OperationId { get; internal set; }
+        [SerializationName("ai.operation.parentId")]
+        public string OperationParentId { get; internal set; }
+        [SerializationName("ai.operation.name")]
+        public string OperationName { get; internal set; }
+        [SerializationName("ai.location.ip")]
+        public string LocationIp { get; internal set; }
     }
 
     internal class AspNetCoreAITelemetryStackFrame
@@ -137,13 +180,17 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         public string Id { get; internal set; }
         public string Name { get; internal set; }
         public string Duration { get; internal set; }
-        public bool Success { get; internal set; }
+        public bool? Success { get; internal set; }
         public string ResponseCode { get; internal set; }
         public string Url { get; internal set; }
         public string Message { get; internal set; }
         public string SeverityLevel { get; internal set; }
+        public string Data { get; internal set; }
+        public string ResultCode { get; internal set; }
+        public string Type { get; internal set; }
+        public string Target { get; internal set; }
         public AspNetCoreAITelemetryProperties Properties { get; internal set; }
-        public AspNetCoreAITelemetryException Exceptions { get; internal set; }
+        public AspNetCoreAITelemetryException[] Exceptions { get; internal set; }
     }
 
     internal class AspNetCoreAITelemetryData
@@ -157,10 +204,24 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         public string Name { get; internal set; }
         public DateTime Time { get; internal set; }
         public string InstrumentationKey { get; internal set; }
+        public AspNetCoreAITelemetryTags Tags { get; internal set; }
         public AspNetCoreAITelemetryData Data { get; internal set; }
 
         public AspNetCoreAITelemetry(string name, string instrumentationKey, bool developerMode)
         {
+            var currentActivity = Activity.Current;
+            var rootActivity = currentActivity;
+            while (rootActivity?.Parent != null)
+            {
+                rootActivity = rootActivity.Parent;
+            }
+            Tags = new AspNetCoreAITelemetryTags
+            {
+                ApplicationVersion = Assembly.GetEntryAssembly()?.GetName().Version.ToString(),
+                CloudRoleInstance = Dns.GetHostName(),
+                OperationName = rootActivity?.Tags?.SingleOrDefault(t => t.Key == AspNetCoreAIConstants.AspNetCoreAIOperationNameTagKey).Value,
+                LocationIp = rootActivity?.Tags?.SingleOrDefault(t => t.Key == AspNetCoreAIConstants.AspNetCoreAILocationIpTagKey).Value
+            };
             var fullname = developerMode
                 ? AspNetCoreAIConstants.DefaultDeveloperTelemetryNamePrefix
                 : AspNetCoreAIConstants.DefaultTelemetryNamePrefix;
@@ -170,7 +231,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
             }
             fullname += $".{name}";
             Name = fullname;
-            Time = Activity.Current?.StartTimeUtc ?? DateTime.UtcNow;
+            Time = currentActivity?.StartTimeUtc ?? DateTime.UtcNow;
             InstrumentationKey = instrumentationKey;
         }
     }
@@ -194,14 +255,17 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
             var request = _httpContext.Request;
             var response = _httpContext.Response;
             var method = request.Method;
-            var url = $"{request.Scheme}://{request.Host}/";
+            var url = $"{request.Scheme}://{request.Host}{request.PathBase}{request.Path}";
             var path = $"{request.PathBase}{request.Path}";
             var statusCode = response.StatusCode;
-            var success = statusCode >= 200 && statusCode < 300;
+            var success = (statusCode > 0) && (statusCode < 400);
             var currentActivity = Activity.Current;
             var duration = currentActivity.Duration;
             var operationId = currentActivity.Id;
+            var remoteIp = _httpContext.Request.Headers["X-Forwarded-For"].ToString()
+                ?? _httpContext.Features.Get<IHttpConnectionFeature>().RemoteIpAddress.ToString();
 
+            Tags.OperationId = currentActivity.RootId;
             Data = new AspNetCoreAITelemetryData
             {
                 BaseType = "RequestData",
@@ -228,7 +292,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
     internal class AspNetCoreAIExceptionTelemetry : AspNetCoreAITelemetry
     {
-        public AspNetCoreAIExceptionTelemetry(string instrumentationKey, bool developerMode, string environment, Exception exception)
+        public AspNetCoreAIExceptionTelemetry(string instrumentationKey, bool developerMode, string environment, Exception exception, string message = null)
             : base("Exception", instrumentationKey, developerMode)
         {
             var parsedStack = new List<AspNetCoreAITelemetryStackFrame>();
@@ -266,17 +330,18 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
                     Ver = 2,
                     Properties = new AspNetCoreAITelemetryProperties
                     {
-                        handledAt = "Platform",
                         DeveloperMode = developerMode ? "true" : "false",
                         AspNetCoreEnvironment = environment
                     },
-                    Exceptions = new AspNetCoreAITelemetryException
-                    {
-                        Id = exception.GetHashCode(),
-                        TypeName = exception.GetType().FullName,
-                        Message = exception.Message,
-                        HasFullStack = true,
-                        ParsedStack = parsedStack.ToArray()
+                    Exceptions = new[] {
+                        new AspNetCoreAITelemetryException
+                        {
+                            Id = exception.GetHashCode(),
+                            TypeName = exception.GetType().FullName,
+                            Message = message ?? exception.Message,
+                            HasFullStack = true,
+                            ParsedStack = parsedStack.ToArray()
+                        }
                     }
                 }
             };
@@ -297,13 +362,44 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
                 {
                     Ver = 2,
                     Message = message,
-                    SeverityLevel = GetSeverityLevel(logLevel),
                     Properties = new AspNetCoreAITelemetryProperties
                     {
                         DeveloperMode = developerMode ? "true" : "false",
                         AspNetCoreEnvironment = environment,
-                        CategoryName = categoryName,
-                        MessageMetadata = state as IReadOnlyList<KeyValuePair<string, object>>
+                    }
+                }
+            };
+        }
+
+        public override string ToString() => JsonConvert.SerializeObject(this, AspNetCoreAIConstants.JsonSerializationSettings);
+
+    }
+    internal class AspNetCoreAIDependencyTelemetry : AspNetCoreAITelemetry
+    {
+        public AspNetCoreAIDependencyTelemetry(string instrumentationKey, bool developerMode, string environment, HttpRequestMessage request, TaskStatus status, HttpResponseMessage response)
+            : base("RemoteDependency", instrumentationKey, developerMode)
+        {
+            var statusCode = (int)response.StatusCode;
+            var currentActivity = Activity.Current;
+
+            Data = new AspNetCoreAITelemetryData
+            {
+                BaseType = "RemoteDependencyData",
+                BaseData = new AspNetCoreAITelemetryBaseData
+                {
+                    Ver = 2,
+                    Name = $"{request.Method} {request.RequestUri.AbsolutePath}",
+                    Id = currentActivity.Id,
+                    Data = request.RequestUri.OriginalString,
+                    Duration = currentActivity.Duration.ToString(),
+                    ResultCode = statusCode.ToString(CultureInfo.InvariantCulture),
+                    Success = (statusCode > 0) && (statusCode < 400),
+                    Type = "Http",
+                    Target = request.RequestUri.Host,
+                    Properties = new AspNetCoreAITelemetryProperties
+                    {
+                        DeveloperMode = developerMode ? "true" : "false",
+                        AspNetCoreEnvironment = environment,
                     }
                 }
             };
@@ -375,6 +471,16 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         [DiagnosticName("Microsoft.AspNetCore.Hosting.HttpRequestIn.Start")]
         public void OnRequestStart(HttpContext httpContext)
         {
+            var currentActivity = Activity.Current;
+            if (string.IsNullOrEmpty(currentActivity.Tags.SingleOrDefault(t => t.Key == AspNetCoreAIConstants.AspNetCoreAIOperationNameTagKey).Value))
+            {
+                currentActivity.AddTag(AspNetCoreAIConstants.AspNetCoreAIOperationNameTagKey, $"{httpContext.Request.Method} {httpContext.Request.PathBase}{httpContext.Request.Path}");
+            }
+            if (string.IsNullOrEmpty(currentActivity.Tags.SingleOrDefault(t => t.Key == AspNetCoreAIConstants.AspNetCoreAILocationIpTagKey).Value))
+            {
+                currentActivity.AddTag(AspNetCoreAIConstants.AspNetCoreAILocationIpTagKey, httpContext.Connection.RemoteIpAddress.ToString());
+            }
+
             httpContext.Features.Set(new AspNetCoreAIRequestTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, httpContext));
         }
 
@@ -398,7 +504,16 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
         private void OnException(Exception exception)
         {
-            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception)}");
+            var telemetry = new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception);
+
+            var currentActivity = Activity.Current;
+            if (currentActivity != null)
+            {
+                telemetry.Tags.OperationId = currentActivity.RootId;
+                telemetry.Tags.OperationParentId = currentActivity.Id;
+            }
+            telemetry.Data.BaseData.Properties.HandledAt = "Platform";
+            Debug.WriteLine($"{_options.TelemetryPrefix}{telemetry}");
         }
     }
 
@@ -419,7 +534,27 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception exception, Func<TState, Exception, string> formatter)
         {
-            Debug.WriteLine($"{_options.TelemetryPrefix}{new AspNetCoreAITraceTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, _categoryName, formatter(state, exception), logLevel, state)}");
+            AspNetCoreAITelemetry telemetry = null;
+            if (exception == null)
+            {
+                telemetry = new AspNetCoreAITraceTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, _categoryName, formatter(state, exception), logLevel, state);
+            }
+            else
+            {
+                telemetry = new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception, formatter(state, exception));
+                telemetry.Data.BaseData.Properties.Exception = exception.ToString();
+            }
+
+            var currentActivity = Activity.Current;
+            if (currentActivity != null)
+            {
+                telemetry.Tags.OperationId = currentActivity.RootId;
+                telemetry.Tags.OperationParentId = currentActivity.Id;
+            }
+            telemetry.Data.BaseData.Properties.CategoryName = _categoryName;
+            telemetry.Data.BaseData.SeverityLevel = logLevel.ToAISeverityLevel();
+            telemetry.Data.BaseData.Properties.MessageMetadata = state as IReadOnlyList<KeyValuePair<string, object>>;
+            Debug.WriteLine($"{_options.TelemetryPrefix}{telemetry}");
         }
     }
 
@@ -447,6 +582,121 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
         }
     }
 
+    internal static class PropertyExtensions
+    {
+        public static object GetProperty(this object obj, string propertyName)
+        {
+            return obj.GetType().GetTypeInfo().GetDeclaredProperty(propertyName)?.GetValue(obj);
+        }
+    }
+
+    internal static class LogLeveExtensions
+    {
+        public static string ToAISeverityLevel(this LogLevel logLevel)
+        {
+            switch (logLevel)
+            {
+                case LogLevel.Critical:
+                    return "Critical";
+                case LogLevel.Error:
+                    return "Error";
+                case LogLevel.Warning:
+                    return "Warning";
+                case LogLevel.Information:
+                    return "Information";
+                case LogLevel.Debug:
+                case LogLevel.Trace:
+                default:
+                    return "Verbose";
+            }
+        }
+    }
+
+    internal class HttpDiagnosticSourceListener : IObserver<KeyValuePair<string, object>>
+    {
+        private AspNetCoreAIOptions _options;
+
+        public HttpDiagnosticSourceListener(AspNetCoreAIOptions options)
+        {
+            _options = options;
+        }
+
+        public void OnCompleted()
+        {
+        }
+
+        public void OnError(Exception error)
+        {
+        }
+
+        public void OnNext(KeyValuePair<string, object> evnt)
+        {
+            switch (evnt.Key)
+            {
+                case "System.Net.Http.HttpRequestOut.Stop":
+                    {
+                        var request = evnt.Value.GetProperty("Request") as HttpRequestMessage;
+                        var status = (TaskStatus)(evnt.Value.GetProperty("RequestTaskStatus"));
+                        var response = evnt.Value.GetProperty("Response") as HttpResponseMessage;
+
+                        var telemetry = new AspNetCoreAIDependencyTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, request, status, response);
+                        var currentActivity = Activity.Current;
+                        if (currentActivity != null)
+                        {
+                            telemetry.Tags.OperationId = currentActivity.RootId;
+                            telemetry.Tags.OperationParentId = currentActivity.Id;
+                        }
+
+                        Debug.WriteLine($"{_options.TelemetryPrefix}{telemetry}");
+                        break;
+                    }
+                case "System.Net.Http.Exception":
+                    {
+                        var exception = evnt.Value.GetProperty("Exception") as Exception;
+                        var telemetry = new AspNetCoreAIExceptionTelemetry(_options.InstrumentationKey, _options.DeveloperMode, _options.Environment, exception);
+                        var currentActivity = Activity.Current;
+                        if (currentActivity != null)
+                        {
+                            telemetry.Tags.OperationId = currentActivity.RootId;
+                            telemetry.Tags.OperationParentId = currentActivity.Id;
+                        }
+
+                        Debug.WriteLine($"{_options.TelemetryPrefix}{telemetry}");
+                        break;
+                    }
+                default:
+                    break;
+            }
+        }
+    }
+
+    internal class HttpDiagnosticSourceSubscriber : IObserver<DiagnosticListener>
+    {
+        private AspNetCoreAIOptions _options;
+
+        public HttpDiagnosticSourceSubscriber(AspNetCoreAIOptions options)
+        {
+            _options = options;
+        }
+
+        public void OnCompleted()
+        {
+        }
+
+        public void OnError(Exception error)
+        {
+        }
+
+        public void OnNext(DiagnosticListener value)
+        {
+
+            if (value.Name == "HttpHandlerDiagnosticListener")
+            {
+                value.Subscribe(new HttpDiagnosticSourceListener(_options));
+            }
+        }
+    }
+
     internal class ApplicationInsightsVisualStudioStartupFilter : IStartupFilter
     {
         public Action<IApplicationBuilder> Configure(Action<IApplicationBuilder> next)
@@ -460,6 +710,7 @@ namespace Microsoft.AspNetCore.ApplicationInsights.VisualStudio.HostingStartup
 
                 var options = new AspNetCoreAIOptions(configuration, env);
                 diagnosticListener.SubscribeWithAdapter(new AIVSDiagnosticsAdapter(options));
+                DiagnosticListener.AllListeners.Subscribe(new HttpDiagnosticSourceSubscriber(options));
 
                 if (string.IsNullOrEmpty(options.InstrumentationKey) && Debugger.IsAttached)
                 {

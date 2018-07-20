@@ -109,7 +109,7 @@
 
   <Target Name="PushSiteExtension" DependsOnTargets="BuildSiteExtension">
     <ItemGroup>
-      <RepositoryNupkgs Include="$(SiteExtensionOutputDirectory)\%(SiteExtensions.PackageName).*.nupkg" />
+      <RepositoryNupkgs Include="$(SiteExtensionOutputDirectory)\%(SiteExtensions.PackageName).*.nupkg" Condition="'%(SiteExtensions.SkipNupkgPublish)' != 'true'" />
     </ItemGroup>
 
     <PushNuGetPackages
